@@ -1,0 +1,132 @@
+//Starcraft
+{
+    "model": "ILM", 
+    "dataset_name": "starcraft",
+    "dataset_path": "starcraft_graphs",
+    "epochs": 10,
+    "train_ratio": 0.8,
+    "node_feature_size": 25,
+    "num_edge_types": 8, // Only 3 present in data set but edge length encoding is size 8
+    "edge_score_threshold": 0.5,
+    "inference_only": false,
+    "edge_percentage": 0.0,
+    "random_edge_percentage": false,
+    "fresh_model": false,
+    "model_params": {
+        "graph_embedding_size": 87,
+        "attention_heads": 4,
+        "max_iterations": 3,
+        "group_count": 2
+    }
+}
+
+//Facebook
+{
+    "model": "ILM", 
+    "dataset_name": "facebook",
+    "dataset_path": "facebook_graphs",
+    "epochs": 10,
+    "train_ratio": 0.8,
+    "node_feature_size": 25,
+    "num_edge_types": 1,
+    "edge_score_threshold": 0.5,
+    "inference_only": false,
+    "edge_percentage": 0.0,
+    "random_edge_percentage": false,
+    "fresh_model": false,
+    "model_params": {
+        "graph_embedding_size": 77,
+        "attention_heads": 4,
+        "max_iterations": 3,
+        "group_count": 5
+    }
+}
+
+//Flickr
+{
+    "model": "ILM", 
+    "dataset_name": "flickr",
+    "dataset_path": "flickr_graphs",
+    "epochs": 10,
+    "train_ratio": 0.8,
+    "node_feature_size": 50,
+    "num_edge_types": 1,
+    "edge_score_threshold": 0.5,
+    "inference_only": false,
+    "edge_percentage": 0.0,
+    "random_edge_percentage": false,
+    "fresh_model": false,
+    "model_params": {
+        "graph_embedding_size": 152,
+        "attention_heads": 4,
+        "max_iterations": 3,
+        "group_count": 7
+    }
+}
+
+//Yelp
+{
+    "model": "ILM", 
+    "dataset_name": "yelp",
+    "dataset_path": "yelp_graphs",
+    "epochs": 70,
+    "train_ratio": 0.8,
+    "node_feature_size": 300,
+    "num_edge_types": 1,
+    "edge_score_threshold": 0.5,
+    "inference_only": false,
+    "edge_percentage": 0.0,
+    "random_edge_percentage": false,
+    "fresh_model": false,
+    "model_params": {
+        "graph_embedding_size": 902,
+        "attention_heads": 4,
+        "max_iterations": 3,
+        "group_count": 100
+    }
+}
+
+
+//Amazon
+{
+    "model": "ILM", 
+    "dataset_name": "amazon",
+    "dataset_path": "amazon_graphs",
+    "epochs": 10,
+    "train_ratio": 0.8,
+    "node_feature_size": 25,
+    "num_edge_types": 3,
+    "edge_score_threshold": 0.5,
+    "inference_only": false,
+    "edge_percentage": 0.0,
+    "random_edge_percentage": false,
+    "fresh_model": false,
+    "model_params": {
+        "graph_embedding_size": 80,
+        "attention_heads": 4,
+        "max_iterations": 3,
+        "group_count": 3
+    }
+}
+
+//Reddit
+{
+    "model": "ILM", 
+    "dataset_name": "reddit",
+    "dataset_path": "reddit_graphs",
+    "epochs": 70,
+    "train_ratio": 0.8,
+    "node_feature_size": 602,
+    "num_edge_types": 1,
+    "edge_score_threshold": 0.5,
+    "inference_only": false,
+    "edge_percentage": 0.0,
+    "random_edge_percentage": false,
+    "fresh_model": false,
+    "model_params": {
+        "graph_embedding_size": 1805,
+        "attention_heads": 4,
+        "max_iterations": 3,
+        "group_count": 41
+    }
+}
