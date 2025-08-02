@@ -70,7 +70,8 @@ https://github.com/working-yuhao/DEAL
   note      = {Main track}
   doi       = {10.24963/ijcai.2020/168},
   url       = {https://doi.org/10.24963/ijcai.2020/168},
-}```
+}
+```
 
 
 LEAP:
