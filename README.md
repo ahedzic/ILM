@@ -11,8 +11,7 @@ pip install requirements.txt
 
 ## Download Data
 
-All datasets can be downloaded here: https://limewire.com/d/cvi6c#kkv7rAnyIq
-
+Due to file size, missing Yelp and Flickr datasets (file includes all datasets) can be downloaded here: XXXX (redacted for anonymous submission)
 Please extract the dataset.zip into the root directory.
 
 
