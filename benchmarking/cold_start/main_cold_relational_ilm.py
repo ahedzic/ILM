@@ -66,7 +66,7 @@ def read_data(data_name, dir_path, cold_perc, blind, num_relations):
                 graph_data = {}
 
                 if ('pos_types' in graph.keys()) and len(graph['pos_types']):
-                    edge_types = torch.tensor(graph['pos_types'], dtype=torch.long)
+                    edge_types = torch.tensor(graph['pos_types'], dtype=torch.float)
                 else:
                     edge_types = torch.zeros((len(train_pos), 1), dtype=torch.float)
 
@@ -87,14 +87,17 @@ def read_data(data_name, dir_path, cold_perc, blind, num_relations):
                             edge_weight = torch.cat((edge_weight,  edge_weight))
                         else:
                             edge_weight = torch.empty(0, dtype=torch.long)
+                            
+                        adj = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight, sparse_sizes=[num_nodes, num_nodes])
                     else:
-                        edge_weight = torch.ones(edge_index.size(1), dtype=torch.long)
+                        edge_weight = torch.zeros(edge_index.size(1), dtype=torch.long)
+                        adj = SparseTensor.from_edge_index(edge_index, edge_weight, [num_nodes, num_nodes])
 
-                    adj = SparseTensor.from_edge_index(edge_index, edge_weight, [num_nodes, num_nodes])
                     data_adj = edge_index
                     ntx_adj = to_networkx(Data(graph['gnn_feature'], data_adj))
                     
                 graph_data['adj'] = adj
+                graph_data['empty_adj'] = SparseTensor(row=torch.empty(0, dtype=torch.long), col=torch.empty(0, dtype=torch.long), value=torch.empty(0, dtype=torch.float32), sparse_sizes=[num_nodes, num_nodes])
                 graph_data['adj_type'] = edge_weight
                 graph_data['data_adj'] = data_adj
                 graph_data['ntx_adj'] = ntx_adj
@@ -167,51 +170,33 @@ def train(model, score_func, graph, optimizer, device, iterations):
     expected_neg = graph['neg'].to(device)
     x = graph['x'].to(device)
     adj = graph['adj'].to(device)
+    empty_adj = graph['empty_adj'].to(device)
     edge_types = graph['adj_type'].to(device)
     ntx_adj = graph['ntx_adj']
     data_adj = graph['data_adj'].to(device)
     total_loss = total_examples = 0
     current_types = edge_types
 
-    optimizer.zero_grad()
-
     given_edges = graph['given_edges']
     num_nodes = graph['node_count']
+    clustering_coeffs = torch.zeros((graph['node_count'], 1)).to(device)
 
     for _ in range(iterations):
-        # Calculate node density
-        node_id, counts = adj.storage.col().unique(return_counts=True)
-        node_density = torch.zeros((graph['node_count'], 1)).to(device)
-
-        for i in range(len(node_id)):
-            node_density[node_id[i]] = float(counts[i])# / float(graph['node_count'])
-
-        node_density = torch.nn.functional.normalize(node_density)
-
+        optimizer.zero_grad()
+    
         # Calculate graph clustering coefficient
         coeffs = nx.clustering(ntx_adj)
-        #graph_clustering_coeff = nx.average_clustering(ntx_adj)
-        clustering_coeffs = torch.zeros((graph['node_count'], 1)).to(device)
 
         for key in coeffs.keys():
             clustering_coeffs[key] = coeffs[key]
 
-        # Calculate assortativity
-        '''if len(data_adj):
-            graph_assortativity = assortativity(data_adj)
-             
-            if math.isnan(graph_assortativity):
-                graph_assortativity = 0.0
-        else:
-            graph_assortativity = 0.0'''
-        graph_assortativity = 0.0
-
         h = model(x, adj, current_types)
+        h_empty = model(x, empty_adj, torch.empty(0, dtype=torch.long).to(device))
         type_loss = torch.nn.CrossEntropyLoss()
         edge = expected_pos
-        pos_out, pos_add_score, pos_types, pos_e_types = score_func(x, h, edge[0], edge[1], node_density, clustering_coeffs, graph_assortativity)
+        pos_out, pos_add_score, pos_types, pos_e_types = score_func(x, h, h_empty, edge[0], edge[1], clustering_coeffs)
         edge = expected_neg
-        neg_out, neg_add_score, neg_types, neg_e_types = score_func(x, h, edge[0], edge[1], node_density, clustering_coeffs, graph_assortativity)
+        neg_out, neg_add_score, neg_types, neg_e_types = score_func(x, h, h_empty, edge[0], edge[1], clustering_coeffs)
 
         if ('pos_types' in graph.keys()) and len(graph['pos_types']):
             pos_loss = -torch.log(pos_out + 1e-15).mean() + type_loss(pos_e_types, graph['pos_types'].to(device))
@@ -247,13 +232,23 @@ def train(model, score_func, graph, optimizer, device, iterations):
                 new_total_edges = torch.cat([train_edge_mask, new_edges_mask], 1).to(torch.long).to(device)
                 #new_edge_weight_mask = torch.ones(train_edge_mask.size(1) + new_edges_mask.size(1)).to(torch.float).to(device)
                 new_edge_weight_mask = torch.cat([edge_types, new_types]).to(torch.int64).to(device)
-                adj = SparseTensor.from_edge_index(new_total_edges, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+                
+                if ('pos_types' in graph.keys()) and len(graph['pos_types']):
+                    adj = SparseTensor.from_edge_index(new_total_edges, edge_attr=new_edge_weight_mask, sparse_sizes=[num_nodes, num_nodes]).to(device)
+                else:
+                    adj = SparseTensor.from_edge_index(new_total_edges, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+
                 data_adj = new_total_edges
                 ntx_adj = to_networkx(Data(x, new_total_edges))
                 current_types = new_edge_weight_mask
             else:
                 new_edge_weight_mask = new_types
-                adj = SparseTensor.from_edge_index(new_edges_mask, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+                
+                if ('pos_types' in graph.keys()) and len(graph['pos_types']):
+                    adj = SparseTensor.from_edge_index(new_edges_mask, edge_attr=new_edge_weight_mask, sparse_sizes=[num_nodes, num_nodes]).to(device)
+                else:
+                    adj = SparseTensor.from_edge_index(new_edges_mask, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+
                 data_adj = new_edges_mask
                 ntx_adj = to_networkx(Data(x, new_edges_mask))
                 current_types = new_edge_weight_mask
@@ -285,67 +280,30 @@ def test_edge(score_func, graph, pos_edges, neg_edges, model, device, iterations
     neg_preds = []
     x = graph['x'].to(device)
     adj = graph['adj'].to(device)
+    empty_adj = graph['empty_adj'].to(device)
     edge_types = graph['adj_type'].to(device)
     ntx_adj = graph['ntx_adj']
     data_adj = graph['data_adj'].to(device)
     given_edges = graph['given_edges']
     num_nodes = graph['node_count']
+    clustering_coeffs = torch.zeros((graph['node_count'], 1)).to(device)
     current_types = edge_types
 
     for _ in range(iterations):
-        # Calculate node density
-        node_id, counts = adj.storage.col().unique(return_counts=True)
-        node_density = torch.zeros((graph['node_count'], 1)).to(device)
-
-        for i in range(len(node_id)):
-            node_density[node_id[i]] = float(counts[i])# / float(graph['node_count'])
-
-        node_density = torch.nn.functional.normalize(node_density)
-
         # Calculate graph clustering coefficient
-        coeffs = None#nx.clustering(ntx_adj)
-        graph_clustering_coeff = None#nx.average_clustering(ntx_adj)
-        clustering_coeffs = torch.zeros((graph['node_count'], 1)).to(device)
-        is_isolated = 0
-        not_isolated = 0
-        global clust
-        global isolated
-        global mags
+        coeffs = nx.clustering(ntx_adj)
 
-        '''for key in coeffs.keys():
+        for key in coeffs.keys():
             clustering_coeffs[key] = coeffs[key]
 
-            if _ == (iterations - 1):
-                clust.append(coeffs[key])
-                
-                if coeffs[key] == 0.0:
-                    is_isolated += 1
-                else:
-                    not_isolated += 1'''
-
-        # Calculate assortativity
-        '''if len(data_adj):
-            graph_assortativity = assortativity(data_adj)
-             
-            if math.isnan(graph_assortativity):
-                graph_assortativity = 0.0
-        else:
-            graph_assortativity = 0.0'''
-        graph_assortativity = 0.0
-
         h = model(x, adj, current_types)
+        h_empty = model(x, empty_adj, torch.empty(0, dtype=torch.long).to(device))
         edges = pos_edges
-        pos_scores, pos_add_score, pos_types, pos_e_types = score_func(x, h, edges[0], edges[1], node_density, clustering_coeffs, graph_assortativity)
+        pos_scores, pos_add_score, pos_types, pos_e_types = score_func(x, h, h_empty, edges[0], edges[1], clustering_coeffs)
         pos_scores = pos_scores.cpu()
 
-        #if _ == (iterations - 1):
-            #isolated.append(is_isolated / (is_isolated + not_isolated))
-
-            #for mag in score_func.mags:
-            #    mags.append(mag)
-
         edges = neg_edges
-        neg_scores, neg_add_score, neg_types, neg_e_types = score_func(x, h, edges[0], edges[1], node_density, clustering_coeffs, graph_assortativity)
+        neg_scores, neg_add_score, neg_types, neg_e_types = score_func(x, h, h_empty, edges[0], edges[1], clustering_coeffs)
         neg_scores = neg_scores.cpu()
 
         if _ != (iterations - 1):
@@ -375,13 +333,23 @@ def test_edge(score_func, graph, pos_edges, neg_edges, model, device, iterations
                 new_total_edges = torch.cat([train_edge_mask, new_edges_mask], 1).to(torch.long).to(device)
                 #new_edge_weight_mask = torch.ones(train_edge_mask.size(1) + new_edges_mask.size(1)).to(torch.float).to(device)
                 new_edge_weight_mask = torch.cat([edge_types, new_types]).to(torch.int64).to(device)
-                adj = SparseTensor.from_edge_index(new_total_edges, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+                
+                if ('pos_types' in graph.keys()) and len(graph['pos_types']):
+                    adj = SparseTensor.from_edge_index(new_total_edges, edge_attr=new_edge_weight_mask, sparse_sizes=[num_nodes, num_nodes]).to(device)
+                else:
+                    adj = SparseTensor.from_edge_index(new_total_edges, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+
                 data_adj = new_total_edges
                 ntx_adj = to_networkx(Data(x, new_total_edges))
                 current_types = new_edge_weight_mask
             else:
                 new_edge_weight_mask = new_types
-                adj = SparseTensor.from_edge_index(new_edges_mask, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+                
+                if ('pos_types' in graph.keys()) and len(graph['pos_types']):
+                    adj = SparseTensor.from_edge_index(new_edges_mask, edge_attr=new_edge_weight_mask, sparse_sizes=[num_nodes, num_nodes]).to(device)
+                else:
+                    adj = SparseTensor.from_edge_index(new_edges_mask, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+
                 data_adj = new_edges_mask
                 ntx_adj = to_networkx(Data(x, new_edges_mask))
                 current_types = new_edge_weight_mask
@@ -428,6 +396,7 @@ def test(model, score_func, data, evaluator_hit, evaluator_mrr, device, iteratio
     clust = []
     isolated = []
     mags = []
+    score_func.reset_meta_distributions()
 
     for graph in data['test']:  
         pos_pred, neg_pred = test_edge(score_func, graph, graph['pos'], graph['neg'], model, device, iterations)
@@ -543,6 +512,7 @@ def main():
     test_times = []
 
     for run in range(args.runs):
+        skip_training = False
 
         print('#################################          ', run, '          #################################')
         
@@ -554,10 +524,17 @@ def main():
 
         init_seed(seed)
         
-        save_path = args.output_dir+'/lr'+str(args.lr) + '_drop' + str(args.dropout) + '_l2'+ str(args.l2) + '_numlayer' + str(args.num_layers)+ '_numPredlay' + str(args.num_layers_predictor) + '_numGinMlplayer' + str(args.gin_mlp_layer)+'_dim'+str(args.hidden_channels) + '_'+ 'best_run_'+str(seed)
+        model_save_path = args.output_dir+'/model_data'+args.data_name+'_model'+args.gnn_model+'_lr'+str(args.lr) + '_drop' + str(args.dropout) + '_l2'+ str(args.l2) + '_numlayer' + str(args.num_layers)+ '_numPredlay' + str(args.num_layers_predictor) + '_dim'+str(args.hidden_channels) + '_'+ 'best_run_'+str(seed)
+        score_save_path = args.output_dir+'/score_data'+args.data_name+'_model'+args.gnn_model+'_lr'+str(args.lr) + '_drop' + str(args.dropout) + '_l2'+ str(args.l2) + '_numlayer' + str(args.num_layers)+ '_numPredlay' + str(args.num_layers_predictor) + '_dim'+str(args.hidden_channels) + '_'+ 'best_run_'+str(seed)
 
-        model.reset_parameters()
-        score_func.reset_parameters()
+        if os.path.exists(model_save_path) and os.path.exists(score_save_path):
+            model.load_state_dict(torch.load(model_save_path))
+            score_func.load_state_dict(torch.load(score_save_path))
+            skip_training = True
+        else:
+            model.reset_parameters()
+            score_func.reset_parameters()
+            score_func.reset_meta_distributions()
 
         optimizer = torch.optim.Adam(
                 list(model.parameters()) + list(score_func.parameters()),lr=args.lr, weight_decay=args.l2)
@@ -570,16 +547,18 @@ def main():
             loss = 0.0
             loss_count = 0
             
-            start_time = time.time()
-            for graph in data['train']:
-                loss += train(model, score_func, graph, optimizer, device, args.iterations)
-                loss_count +=1
-                train_memory.append(torch.cuda.max_memory_allocated(device=None))
-            train_times.append(time.time() - start_time)
+            if not skip_training:
+                start_time = time.time()
+                for graph in data['train']:
+                    loss += train(model, score_func, graph, optimizer, device, args.iterations)
+                    loss_count +=1
+                    train_memory.append(torch.cuda.max_memory_allocated(device=None))
+                train_times.append(time.time() - start_time)
             
             if epoch % args.eval_steps == 0:
                 model.eval()
                 score_func.eval()
+                score_func.reset_meta_distributions()
                 start_time = time.time()
                 results_rank, score_emb = test(model, score_func, data, evaluator_hit, evaluator_mrr, device, args.iterations)
                 test_memory.append(torch.cuda.max_memory_allocated(device=None))
@@ -598,17 +577,25 @@ def main():
                         train_hits, valid_hits, test_hits = result
                        
 
-                        log_print.info(
-                            f'Run: {run + 1:02d}, '
-                              f'Epoch: {epoch:02d}, '
-                              f'Loss: {(loss / loss_count):.4f}, '
-                              f'Train: {100 * train_hits:.2f}%, '
-                              f'Valid: {100 * valid_hits:.2f}%, '
-                              f'Test: {100 * test_hits:.2f}%')
+                        if skip_training:
+                            log_print.info(
+                                f'Run: {run + 1:02d}, '
+                                f'Epoch: {epoch:02d}, '
+                                f'Train: {100 * train_hits:.2f}%, '
+                                f'Valid: {100 * valid_hits:.2f}%, '
+                                f'Test: {100 * test_hits:.2f}%')
+                        else:
+                            log_print.info(
+                                f'Run: {run + 1:02d}, '
+                                f'Epoch: {epoch:02d}, '
+                                f'Loss: {(loss / loss_count):.4f}, '
+                                f'Train: {100 * train_hits:.2f}%, '
+                                f'Valid: {100 * valid_hits:.2f}%, '
+                                f'Test: {100 * test_hits:.2f}%')
                     print('---')
 
                 best_valid_current = torch.tensor(loggers[eval_metric].results[run])[:, 1].max()
-                print("Meta distributions global:", distribution[0], "local:", distribution[1], "diff:", distribution[2])
+                print("Meta distributions global(0 hop):", distribution[0], "global(1 hop):", distribution[1], "global(2 hop):", distribution[2], "sim(0 hop):", distribution[3], "sim(1 hop):", distribution[4], "sim(2 hop):", distribution[5], "diff(0 hop):", distribution[6], "diff(1 hop):", distribution[7], "diff(2 hop):", distribution[8])
 
                 if best_valid_current > best_valid:
                     best_valid = best_valid_current
@@ -622,7 +609,7 @@ def main():
                 else:
                     kill_cnt += 1
                     
-                    if kill_cnt > args.kill_cnt: 
+                    if (kill_cnt > args.kill_cnt) or skip_training: 
                         print("Early Stopping!!")
                         break
         

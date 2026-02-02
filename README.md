@@ -11,7 +11,7 @@ pip install requirements.txt
 
 ## Download Data
 
-Due to file size, missing Yelp and Flickr datasets (file includes all datasets) can be downloaded here: XXXX (redacted for anonymous submission)
+Due to file size, missing Yelp and Flickr datasets (file includes all datasets) can be downloaded here: https://arizonastateu-my.sharepoint.com/:u:/g/personal/ahedzic_sundevils_asu_edu/IQCR4MBx8OTaRJypeiyL-v9EAXFbUjC7-EjyKQGfw14KQsE?e=z8LeRJ
 Please extract the dataset.zip into the root directory.
 
 

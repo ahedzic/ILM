@@ -67,16 +67,17 @@ def read_data(data_name, dir_path, cold_perc, blind):
                     adj_edge = torch.transpose(torch.tensor(given_edges), 1, 0)
                     edge_index = torch.cat((adj_edge,  adj_edge[[1,0]]), dim=1)
 
-                    if ('pos_types' in graph.keys()) and len(graph['pos_types']):
+                    if len(graph['pos_types']):
                         if len(graph['given_types']):
                             edge_weight = torch.tensor(graph['given_types'], dtype=torch.long)
                             edge_weight = torch.cat((edge_weight,  edge_weight))
                         else:
                             edge_weight = torch.empty(0, dtype=torch.long)
+                            
+                        adj = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight, sparse_sizes=[num_nodes, num_nodes])
                     else:
-                        edge_weight = torch.ones(edge_index.size(1), dtype=torch.long)
-
-                    adj = SparseTensor.from_edge_index(edge_index, edge_weight, [num_nodes, num_nodes])
+                        edge_weight = torch.zeros(edge_index.size(1), dtype=torch.long)
+                        adj = SparseTensor.from_edge_index(edge_index, edge_weight, [num_nodes, num_nodes])
                     
                 graph_data['adj'] = adj
                 graph_data['adj_type'] = edge_weight
@@ -196,11 +197,21 @@ def train(model, score_func, graph, optimizer, device, iterations):
                 train_edge_mask = torch.cat((given_edges, given_edges[[1,0]]), dim=1).to(device)
                 new_total_edges = torch.cat([train_edge_mask, new_edges_mask], 1).to(torch.long).to(device)
                 new_edge_weight_mask = torch.cat([edge_types, new_types]).to(torch.int64).to(device)
-                adj = SparseTensor.from_edge_index(new_total_edges, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+
+                if ('pos_types' in graph.keys()) and len(graph['pos_types']):
+                    adj = SparseTensor.from_edge_index(new_total_edges, edge_attr=new_edge_weight_mask, sparse_sizes=[num_nodes, num_nodes]).to(device)
+                else:
+                    adj = SparseTensor.from_edge_index(new_total_edges, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+
                 current_types = new_edge_weight_mask
             else:
                 new_edge_weight_mask = new_types
-                adj = SparseTensor.from_edge_index(new_edges_mask, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+                
+                if ('pos_types' in graph.keys()) and len(graph['pos_types']):
+                    adj = SparseTensor.from_edge_index(new_edges_mask, edge_attr=new_edge_weight_mask, sparse_sizes=[num_nodes, num_nodes]).to(device)
+                else:
+                    adj = SparseTensor.from_edge_index(new_edges_mask, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+
                 current_types = new_edge_weight_mask
 
         loss = pos_loss + neg_loss
@@ -262,11 +273,21 @@ def test_edge(score_func, graph, pos_edges, neg_edges, model, device, iterations
                 train_edge_mask = torch.cat((given_edges, given_edges[[1,0]]), dim=1).to(device)
                 new_total_edges = torch.cat([train_edge_mask, new_edges_mask], 1).to(torch.long).to(device)
                 new_edge_weight_mask = torch.cat([edge_types, new_types]).to(torch.int64).to(device)
-                adj = SparseTensor.from_edge_index(new_total_edges, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+                
+                if ('pos_types' in graph.keys()) and len(graph['pos_types']):
+                    adj = SparseTensor.from_edge_index(new_total_edges, edge_attr=new_edge_weight_mask, sparse_sizes=[num_nodes, num_nodes]).to(device)
+                else:
+                    adj = SparseTensor.from_edge_index(new_total_edges, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+
                 current_types = new_edge_weight_mask
             else:
                 new_edge_weight_mask = new_types
-                adj = SparseTensor.from_edge_index(new_edges_mask, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+                
+                if ('pos_types' in graph.keys()) and len(graph['pos_types']):
+                    adj = SparseTensor.from_edge_index(new_edges_mask, edge_attr=new_edge_weight_mask, sparse_sizes=[num_nodes, num_nodes]).to(device)
+                else:
+                    adj = SparseTensor.from_edge_index(new_edges_mask, new_edge_weight_mask, [num_nodes, num_nodes]).to(device)
+
                 current_types = new_edge_weight_mask
 
     
@@ -417,6 +438,7 @@ def main():
     test_times = []
 
     for run in range(args.runs):
+        skip_training = False
 
         print('#################################          ', run, '          #################################')
         
@@ -428,10 +450,16 @@ def main():
 
         init_seed(seed)
         
-        save_path = args.output_dir+'/lr'+str(args.lr) + '_drop' + str(args.dropout) + '_l2'+ str(args.l2) + '_numlayer' + str(args.num_layers)+ '_numPredlay' + str(args.num_layers_predictor) + '_numGinMlplayer' + str(args.gin_mlp_layer)+'_dim'+str(args.hidden_channels) + '_'+ 'best_run_'+str(seed)
+        model_save_path = args.output_dir+'/gnnmodel_data'+args.data_name+'_model'+args.gnn_model+'_lr'+str(args.lr) + '_drop' + str(args.dropout) + '_l2'+ str(args.l2) + '_numlayer' + str(args.num_layers)+ '_numPredlay' + str(args.num_layers_predictor) + '_dim'+str(args.hidden_channels) + '_'+ 'best_run_'+str(seed)
+        score_save_path = args.output_dir+'/gnnscore_data'+args.data_name+'_model'+args.gnn_model+'_lr'+str(args.lr) + '_drop' + str(args.dropout) + '_l2'+ str(args.l2) + '_numlayer' + str(args.num_layers)+ '_numPredlay' + str(args.num_layers_predictor) + '_dim'+str(args.hidden_channels) + '_'+ 'best_run_'+str(seed)
 
-        model.reset_parameters()
-        score_func.reset_parameters()
+        if os.path.exists(model_save_path) and os.path.exists(score_save_path):
+            model.load_state_dict(torch.load(model_save_path))
+            score_func.load_state_dict(torch.load(score_save_path))
+            skip_training = True
+        else:
+            model.reset_parameters()
+            score_func.reset_parameters()
 
         optimizer = torch.optim.Adam(
                 list(model.parameters()) + list(score_func.parameters()),lr=args.lr, weight_decay=args.l2)
@@ -445,12 +473,13 @@ def main():
             loss = 0.0
             loss_count = 0
             
-            start_time = time.time()
-            for graph in data['train']:
-                loss += train(model, score_func, graph, optimizer, device, args.iterations)
-                loss_count +=1
-                train_memory.append(torch.cuda.max_memory_allocated(device=None))
-            train_times.append(time.time() - start_time)
+            if not skip_training:
+                start_time = time.time()
+                for graph in data['train']:
+                    loss += train(model, score_func, graph, optimizer, device, args.iterations)
+                    loss_count +=1
+                    train_memory.append(torch.cuda.max_memory_allocated(device=None))
+                train_times.append(time.time() - start_time)
             
             if epoch % args.eval_steps == 0:
                 model.eval()
@@ -471,13 +500,21 @@ def main():
                         train_hits, valid_hits, test_hits = result
                        
 
-                        log_print.info(
-                            f'Run: {run + 1:02d}, '
-                              f'Epoch: {epoch:02d}, '
-                              f'Loss: {(loss / loss_count):.4f}, '
-                              f'Train: {100 * train_hits:.2f}%, '
-                              f'Valid: {100 * valid_hits:.2f}%, '
-                              f'Test: {100 * test_hits:.2f}%')
+                        if skip_training:
+                            log_print.info(
+                                f'Run: {run + 1:02d}, '
+                                f'Epoch: {epoch:02d}, '
+                                f'Train: {100 * train_hits:.2f}%, '
+                                f'Valid: {100 * valid_hits:.2f}%, '
+                                f'Test: {100 * test_hits:.2f}%')
+                        else:
+                            log_print.info(
+                                f'Run: {run + 1:02d}, '
+                                f'Epoch: {epoch:02d}, '
+                                f'Loss: {(loss / loss_count):.4f}, '
+                                f'Train: {100 * train_hits:.2f}%, '
+                                f'Valid: {100 * valid_hits:.2f}%, '
+                                f'Test: {100 * test_hits:.2f}%')
                     print('---')
 
                 best_valid_current = torch.tensor(loggers[eval_metric].results[run])[:, 1].max()
@@ -494,7 +531,7 @@ def main():
                 else:
                     kill_cnt += 1
                     
-                    if kill_cnt > args.kill_cnt: 
+                    if (kill_cnt > args.kill_cnt) or skip_training:  
                         print("Early Stopping!!")
                         break
         

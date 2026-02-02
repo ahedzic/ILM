@@ -46,7 +46,7 @@ class meta_score(torch.nn.Module):
     def get_meta_distributions(self):
         return self.meta_distributions / self.meta_count
 
-    def forward(self, x, h, h_empty, edge_i, edge_j, iteration=0, already_linked=None, clustering_coeffs=None, common_neighbors=None):
+    def forward(self, x, h, h_empty, edge_i, edge_j, clustering_coeffs=None):
         feat = self.feat_layer(x[edge_i] * x[edge_j])
         feat = torch.nn.functional.normalize(feat, dim=1)
         glob_0 = torch.sum(h_empty[0], dim=0)
@@ -72,55 +72,49 @@ class meta_score(torch.nn.Module):
         diff_2 = torch.nn.functional.normalize(diff_2, dim=1)
         clust_i = clustering_coeffs[edge_i].repeat(1, len(feat[0]))
         clust_j = clustering_coeffs[edge_j].repeat(1, len(feat[0]))
-        #linked = already_linked.repeat(1, len(feat[0]))
         meta_info = torch.cat((feat, clust_i, clust_j), dim=1)
         m = self.late_meta_attn_fc_1(meta_info)
         m = F.relu(m)
         m = F.dropout(m, p=self.dropout, training=self.training)
         m = self.late_meta_attn_fc_2(m)
 
-        if len(sim_2.shape) == 3:
-            late_meta_scores = F.softmax(m, dim=2)
-            #meta_embedding = (late_meta_scores[:, :, 0].view(-1, late_meta_scores.shape[1], 1) * glob) + (late_meta_scores[:, :, 1].view(-1, late_meta_scores.shape[1], 1) * local) + (late_meta_scores[:, :, 2].view(-1, late_meta_scores.shape[1], 1) * diff)
+        if self.weights == 'meta':
+            late_meta_scores = F.softmax(m, dim=1)
         else:
-            if self.weights == 'meta':
-                late_meta_scores = F.softmax(m, dim=1)
-            else:
-                late_meta_scores = torch.zeros(F.softmax(m, dim=1).shape).to(self.device)
+            late_meta_scores = torch.zeros(F.softmax(m, dim=1).shape).to(self.device)
             
-                if self.weights == 'global0':
-                    late_meta_scores[:, 0] = 1.0
-                if self.weights == 'global1':
-                    late_meta_scores[:, 1] = 1.0
-                if self.weights == 'global2':
-                    late_meta_scores[:, 2] = 1.0
-                if self.weights == 'sim0':
-                    late_meta_scores[:, 3] = 1.0
-                if self.weights == 'sim1':
-                    late_meta_scores[:, 4] = 1.0
-                if self.weights == 'sim2':
-                    late_meta_scores[:, 5] = 1.0
-                if self.weights == 'diff0':
-                    late_meta_scores[:, 6] = 1.0
-                if self.weights == 'diff1':
-                    late_meta_scores[:, 7] = 1.0
-                if self.weights == 'diff2':
-                    late_meta_scores[:, 8] = 1.0
+            if self.weights == 'global0':
+                late_meta_scores[:, 0] = 1.0
+            if self.weights == 'global1':
+                late_meta_scores[:, 1] = 1.0
+            if self.weights == 'global2':
+                late_meta_scores[:, 2] = 1.0
+            if self.weights == 'sim0':
+                late_meta_scores[:, 3] = 1.0
+            if self.weights == 'sim1':
+                late_meta_scores[:, 4] = 1.0
+            if self.weights == 'sim2':
+                late_meta_scores[:, 5] = 1.0
+            if self.weights == 'diff0':
+                late_meta_scores[:, 6] = 1.0
+            if self.weights == 'diff1':
+                late_meta_scores[:, 7] = 1.0
+            if self.weights == 'diff2':
+                late_meta_scores[:, 8] = 1.0
 
-            score_sum = torch.sum(late_meta_scores, dim=0)
-            self.meta_distributions[0] += score_sum[0] / late_meta_scores.shape[0]
-            self.meta_distributions[1] += score_sum[1] / late_meta_scores.shape[0]
-            self.meta_distributions[2] += score_sum[2] / late_meta_scores.shape[0]
-            self.meta_distributions[3] += score_sum[3] / late_meta_scores.shape[0]
-            self.meta_distributions[4] += score_sum[4] / late_meta_scores.shape[0]
-            self.meta_distributions[5] += score_sum[5] / late_meta_scores.shape[0]
-            self.meta_distributions[6] += score_sum[6] / late_meta_scores.shape[0]
-            self.meta_distributions[7] += score_sum[7] / late_meta_scores.shape[0]
-            self.meta_distributions[8] += score_sum[8] / late_meta_scores.shape[0]
-            self.meta_count += 1
+        score_sum = torch.sum(late_meta_scores, dim=0)
+        self.meta_distributions[0] += score_sum[0].item() / late_meta_scores.shape[0]
+        self.meta_distributions[1] += score_sum[1].item() / late_meta_scores.shape[0]
+        self.meta_distributions[2] += score_sum[2].item() / late_meta_scores.shape[0]
+        self.meta_distributions[3] += score_sum[3].item() / late_meta_scores.shape[0]
+        self.meta_distributions[4] += score_sum[4].item() / late_meta_scores.shape[0]
+        self.meta_distributions[5] += score_sum[5].item() / late_meta_scores.shape[0]
+        self.meta_distributions[6] += score_sum[6].item() / late_meta_scores.shape[0]
+        self.meta_distributions[7] += score_sum[7].item() / late_meta_scores.shape[0]
+        self.meta_distributions[8] += score_sum[8].item() / late_meta_scores.shape[0]
+        self.meta_count += 1
             
-            meta_embedding = (late_meta_scores[:, 0].view(-1, 1) * glob_0) + (late_meta_scores[:, 1].view(-1, 1) * glob_1) + (late_meta_scores[:, 2].view(-1, 1) * glob_2) + (late_meta_scores[:, 3].view(-1, 1) * sim_0) + (late_meta_scores[:, 4].view(-1, 1) * sim_1) + (late_meta_scores[:, 5].view(-1, 1) * sim_2) + (late_meta_scores[:, 6].view(-1, 1) * diff_0) + (late_meta_scores[:, 7].view(-1, 1) * diff_1) + (late_meta_scores[:, 8].view(-1, 1) * diff_2)
-
+        meta_embedding = (late_meta_scores[:, 0].view(-1, 1) * glob_0) + (late_meta_scores[:, 1].view(-1, 1) * glob_1) + (late_meta_scores[:, 2].view(-1, 1) * glob_2) + (late_meta_scores[:, 3].view(-1, 1) * sim_0) + (late_meta_scores[:, 4].view(-1, 1) * sim_1) + (late_meta_scores[:, 5].view(-1, 1) * sim_2) + (late_meta_scores[:, 6].view(-1, 1) * diff_0) + (late_meta_scores[:, 7].view(-1, 1) * diff_1) + (late_meta_scores[:, 8].view(-1, 1) * diff_2)
         x = meta_embedding
 
         for lin in self.lins[:-1]:
@@ -129,5 +123,5 @@ class meta_score(torch.nn.Module):
             x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.lins[-1](x)
         score = torch.sigmoid(x)
-        return score, torch.sigmoid(self.add_edge(score))
+        return score
 
